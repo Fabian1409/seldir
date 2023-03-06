@@ -1,40 +1,64 @@
-use cursive::Cursive;
-use cursive::theme::{Theme, BorderStyle, ColorStyle, Color};
+use cursive::theme::{BorderStyle, Color, ColorStyle, Theme};
 use cursive::utils::markup::StyledString;
-use cursive::view::{Nameable, Resizable, Scrollable, Margins};
-use cursive::views::{Dialog, SelectView, LinearLayout, Layer, ViewRef, TextView};
+use cursive::view::{Margins, Nameable, Resizable};
+use cursive::views::{Dialog, Layer, LinearLayout, SelectView, TextView, ViewRef};
+use cursive::Cursive;
 use std::cmp::Ordering;
-use std::str::FromStr;
-use std::fs;
 use std::env;
+use std::fs;
+use std::str::FromStr;
 
-struct Item {
+struct State {
+    show_hidden: bool,
+}
+
+impl State {
+    fn new() -> State {
+        State { show_hidden: false }
+    }
+}
+
+#[derive(Debug)]
+struct File {
+    label: String,
     path: String,
     is_dir: bool,
 }
 
-impl Item {
-    fn new(path: String) -> Item {
-        let metadata = fs::metadata(path.clone()).unwrap();
-        let is_dir = metadata.is_dir();
-        Item { path, is_dir }
+impl File {
+    fn new(path: String, is_dir: bool) -> File {
+        let label = match path.split('/').last() {
+            Some(name) => name.to_owned(),
+            None => path.clone(),
+        };
+        File {
+            label,
+            path,
+            is_dir,
+        }
     }
 }
 
-fn update_selects(s: &mut Cursive, is_enter: bool) {
+fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
     let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
     let mut prev_dialog: ViewRef<Dialog> = s.find_name("prev_dialog").unwrap();
-    let curr_select = curr_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
-    let prev_select = prev_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
+    let curr_select = curr_dialog
+        .get_content_mut()
+        .downcast_mut::<SelectView<File>>()
+        .unwrap();
+    let prev_select = prev_dialog
+        .get_content_mut()
+        .downcast_mut::<SelectView<File>>()
+        .unwrap();
     let selection = curr_select.selection().unwrap();
 
-    if !selection.is_dir && is_enter {
-        return;
-    }
-
-    if (is_enter && env::set_current_dir(&selection.path).is_err()) ||
-        env::set_current_dir("../").is_err() {
-        return;
+    if is_enter {
+        if !selection.is_dir {
+            return;
+        }
+        env::set_current_dir(&selection.path).unwrap();
+    } else {
+        env::set_current_dir("../").unwrap();
     }
 
     curr_select.clear();
@@ -42,79 +66,80 @@ fn update_selects(s: &mut Cursive, is_enter: bool) {
     populate_select(prev_select, String::from("../"));
     populate_select(curr_select, String::from("./"));
     update_next(s, &curr_select.selection().unwrap());
-
-    if is_enter {
-        let id = prev_select.iter().position(|item| item.1.path.contains(&selection.path)).unwrap();
-        prev_select.set_selection(id);
-    } else {
-        update_prev_selection(prev_select);
-    };
+    update_prev(prev_select);
 
     let mut path_text: ViewRef<TextView> = s.find_name("path_text").unwrap();
     path_text.set_content(env::current_dir().unwrap().to_str().unwrap());
 }
 
-fn update_next(s: &mut Cursive, item: &Item) {
+fn update_next(s: &mut Cursive, item: &File) {
     let mut next_dialog: ViewRef<Dialog> = s.find_name("next_dialog").unwrap();
-    let next_select = next_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
+    let next_select = next_dialog
+        .get_content_mut()
+        .downcast_mut::<SelectView<File>>()
+        .unwrap();
     next_select.clear();
     if item.is_dir {
         populate_select(next_select, item.path.clone());
     }
 }
 
-fn update_prev_selection(prev_select: &mut SelectView<Item>) {
-    let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
-    let parent_dir = cwd.split('/').last().unwrap();
-    let id = prev_select.iter().position(|item| item.1.path.contains(parent_dir)).unwrap();
+fn update_prev(prev_select: &mut SelectView<File>) {
+    let id = prev_select
+        .iter()
+        .position(|item| {
+            item.1
+                .path
+                .eq(env::current_dir().unwrap().to_str().unwrap())
+        })
+        .unwrap();
     prev_select.set_selection(id);
 }
 
-fn read_dir_custom(path: &str) -> Option<Vec<String>> {
-    let read_dir = fs::read_dir(path);
-    if read_dir.is_err() {
-        return None;
-    }
-    let mut dirs: Vec<String> = fs::read_dir(path).unwrap()
-        .filter_map(|x| x.ok())
-        .map(|x| x.path().to_string_lossy().into_owned())
-        .filter(|x| 
-            !fs::symlink_metadata(x).unwrap().is_symlink() &&
-            !x.split('/').last().unwrap().starts_with('.'))
-        .collect();
-
+fn read_dir_custom(path: &str) -> Option<Vec<File>> {
+    let mut dirs = fs::read_dir(path)
+        .ok()?
+        .flatten()
+        .filter(|x| !fs::symlink_metadata(x.path()).unwrap().is_symlink())
+        .map(|x| {
+            let path = x.path().to_str().unwrap().to_owned();
+            let abs_path = fs::canonicalize(path).unwrap().to_str().unwrap().to_owned();
+            let metadata = fs::metadata(x.path()).unwrap();
+            File::new(abs_path, metadata.is_dir())
+        })
+        .collect::<Vec<_>>();
     dirs.sort_by(|a, b| {
-        let a_meta = fs::metadata(a).unwrap();
-        let b_meta = fs::metadata(b).unwrap();
-        if a_meta.is_dir() && b_meta.is_dir() {
-            a.cmp(b)
-        } else if a_meta.is_dir() && !b_meta.is_dir() {
-            Ordering::Less            
-        } else if !a_meta.is_dir() && b_meta.is_dir() {
+        if a.is_dir && b.is_dir {
+            a.label.cmp(&b.label)
+        } else if a.is_dir && !b.is_dir {
+            Ordering::Less
+        } else if !a.is_dir && b.is_dir {
             Ordering::Greater
         } else {
-            a.cmp(b)
+            a.label.cmp(&b.label)
         }
     });
     Some(dirs)
 }
 
-fn populate_select(select: &mut SelectView<Item>, path: String) {
+fn populate_select(select: &mut SelectView<File>, path: String) {
     match read_dir_custom(&path) {
-        Some(dirs) => {
-                for dir in dirs {
-                let label_str = dir.replace(&path, "").replace('/', "");
-                let item = Item::new(dir);
+        Some(files) => {
+            for file in files {
                 let mut style = ColorStyle::terminal_default();
-                if item.is_dir {
+                if file.is_dir {
                     style.front = cursive::theme::ColorType::Color(Color::from_str("red").unwrap());
-                } 
-                select.add_item(StyledString::styled(label_str, style), item);
+                }
+                select.add_item(StyledString::styled(file.label.clone(), style), file);
             }
-        },
+        }
         None => {
-            let dummy_item = Item { path: "".to_owned(), is_dir: false };
-            select.add_item("...", dummy_item);
+            let dummy_item = File {
+                label: "...".to_owned(),
+                path: "".to_owned(),
+                is_dir: false,
+            };
+            select.add_item(dummy_item.label.clone(), dummy_item);
         }
     }
 }
@@ -123,36 +148,40 @@ fn main() {
     let mut siv = cursive::default();
     let mut theme = Theme::terminal_default();
     theme.borders = BorderStyle::None;
-    theme.palette.set_color("Highlight", Color::from_str("red").unwrap());
-    theme.palette.set_color("HighlightInactive", Color::from_str("red").unwrap());
+    theme
+        .palette
+        .set_color("Highlight", Color::from_str("red").unwrap());
+    theme
+        .palette
+        .set_color("HighlightInactive", Color::from_str("red").unwrap());
     siv.set_theme(theme);
 
-    let mut prev_select = SelectView::<Item>::new().disabled();
-    let mut curr_select = SelectView::<Item>::new();
-    let mut next_select = SelectView::<Item>::new().disabled().with_inactive_highlight(false);
+    let state = State::new();
+    siv.set_user_data(state);
+
+    let mut prev_select = SelectView::<File>::new().disabled();
+    let mut curr_select = SelectView::<File>::new();
+    let mut next_select = SelectView::<File>::new()
+        .disabled()
+        .with_inactive_highlight(false);
 
     populate_select(&mut prev_select, String::from("../"));
     populate_select(&mut curr_select, String::from("./"));
-
-    update_prev_selection(&mut prev_select);
+    update_prev(&mut prev_select);
 
     let curr_selection = curr_select.selection().unwrap();
     if curr_selection.is_dir {
-       populate_select(&mut next_select, curr_selection.path.clone()) 
+        populate_select(&mut next_select, curr_selection.path.clone())
     }
 
     curr_select.set_on_select(update_next);
 
-    siv.add_layer(
-        Layer::new(
-            LinearLayout::vertical()
-                .child(
-                    TextView::new(
-                        env::current_dir().unwrap()
-                            .to_string_lossy()
-                    ).with_name("path_text")
-                )
-                .child(
+    siv.add_fullscreen_layer(Layer::new(
+        LinearLayout::vertical()
+            .child(
+                TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name("path_text"),
+            )
+            .child(
                 LinearLayout::horizontal()
                     .child(
                         Dialog::new()
@@ -160,29 +189,24 @@ fn main() {
                             .content(prev_select)
                             .with_name("prev_dialog")
                             .full_height()
-                            .fixed_width(20)
+                            .fixed_width(20),
                     )
                     .child(
                         Dialog::new()
                             .padding(Margins::zeroes())
                             .content(curr_select)
                             .with_name("curr_dialog")
-                            .scrollable()
-                            .show_scrollbars(false)
-                            .full_height()
-                            .full_width()
+                            .full_width(),
                     )
                     .child(
                         Dialog::new()
                             .padding(Margins::zeroes())
                             .content(next_select)
                             .with_name("next_dialog")
-                            .full_height()
-                            .full_width()
-                    )
-                )
-        ),
-    );
+                            .full_screen(),
+                    ),
+            ),
+    ));
 
     siv.focus_name("curr_dialog").unwrap();
     siv.add_global_callback('q', |s| {
@@ -192,38 +216,48 @@ fn main() {
     });
     siv.add_global_callback('j', |s| {
         let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let curr_select = curr_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
+        let curr_select = curr_dialog
+            .get_content_mut()
+            .downcast_mut::<SelectView<File>>()
+            .unwrap();
         let cb = curr_select.select_down(1);
         cb(s);
     });
     siv.add_global_callback('k', |s| {
         let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let curr_select = curr_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
+        let curr_select = curr_dialog
+            .get_content_mut()
+            .downcast_mut::<SelectView<File>>()
+            .unwrap();
         let cb = curr_select.select_up(1);
         cb(s);
     });
     siv.add_global_callback('l', |s| {
-        update_selects(s, true);
+        update_prev_curr(s, true);
     });
     siv.add_global_callback('h', |s| {
-        update_selects(s, false);
+        update_prev_curr(s, false);
     });
     siv.add_global_callback('G', |s| {
         let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let curr_select = curr_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
+        let curr_select = curr_dialog
+            .get_content_mut()
+            .downcast_mut::<SelectView<File>>()
+            .unwrap();
         let cb = curr_select.set_selection(curr_select.len() - 1);
         cb(s);
     });
     siv.add_global_callback('g', |s| {
-        if s.user_data::<bool>().is_none() {
-            s.set_user_data(true);
-        } else {
-            s.take_user_data::<bool>().unwrap();
-            let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-            let curr_select = curr_dialog.get_content_mut().downcast_mut::<SelectView<Item>>().unwrap();
-            let cb = curr_select.set_selection(0);
-            cb(s);
-        }
+        let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
+        let curr_select = curr_dialog
+            .get_content_mut()
+            .downcast_mut::<SelectView<File>>()
+            .unwrap();
+        let cb = curr_select.set_selection(0);
+        cb(s);
+    });
+    siv.add_global_callback('t', |s| {
+        s.user_data::<State>().unwrap().show_hidden ^= true;
     });
 
     siv.run();
