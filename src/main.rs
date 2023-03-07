@@ -1,7 +1,8 @@
+use cursive::event::Event;
 use cursive::theme::{BorderStyle, Color, ColorStyle, Theme};
 use cursive::utils::markup::StyledString;
 use cursive::view::{Margins, Nameable, Resizable};
-use cursive::views::{Dialog, Layer, LinearLayout, SelectView, TextView, ViewRef};
+use cursive::views::{Dialog, Layer, LinearLayout, SelectView, TextView, ViewRef, TextArea};
 use cursive::Cursive;
 use std::cmp::Ordering;
 use std::env;
@@ -50,21 +51,22 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
         .get_content_mut()
         .downcast_mut::<SelectView<File>>()
         .unwrap();
-    let selection = curr_select.selection().unwrap();
 
     if is_enter {
-        if !selection.is_dir {
+        let selection = curr_select.selection().unwrap();
+        if selection.is_dir {
+            env::set_current_dir(&selection.path).unwrap();
+        } else {
             return;
         }
-        env::set_current_dir(&selection.path).unwrap();
     } else {
         env::set_current_dir("../").unwrap();
     }
+    
+    let show_hidden = s.user_data::<State>().unwrap().show_hidden;
 
-    curr_select.clear();
-    prev_select.clear();
-    populate_select(prev_select, String::from("../"));
-    populate_select(curr_select, String::from("./"));
+    populate_select(prev_select, String::from("../"), show_hidden);
+    populate_select(curr_select, String::from("./"), show_hidden);
     update_next(s, &curr_select.selection().unwrap());
     update_prev(prev_select);
 
@@ -80,7 +82,8 @@ fn update_next(s: &mut Cursive, item: &File) {
         .unwrap();
     next_select.clear();
     if item.is_dir {
-        populate_select(next_select, item.path.clone());
+        let show_hidden = s.user_data::<State>().unwrap().show_hidden;
+        populate_select(next_select, item.path.clone(), show_hidden);
     }
 }
 
@@ -96,11 +99,13 @@ fn update_prev(prev_select: &mut SelectView<File>) {
     prev_select.set_selection(id);
 }
 
-fn read_dir_custom(path: &str) -> Option<Vec<File>> {
+fn read_dir_custom(path: &str, show_hidden: bool) -> Option<Vec<File>> {
     let mut dirs = fs::read_dir(path)
         .ok()?
         .flatten()
-        .filter(|x| !fs::symlink_metadata(x.path()).unwrap().is_symlink())
+        .filter(|x| !fs::symlink_metadata(x.path()).unwrap().is_symlink() &&
+            (show_hidden || !x.path().to_string_lossy().split('/').last().unwrap().starts_with('.'))
+        )
         .map(|x| {
             let path = x.path().to_str().unwrap().to_owned();
             let abs_path = fs::canonicalize(path).unwrap().to_str().unwrap().to_owned();
@@ -119,11 +124,16 @@ fn read_dir_custom(path: &str) -> Option<Vec<File>> {
             a.label.cmp(&b.label)
         }
     });
-    Some(dirs)
+    if dirs.is_empty() {
+        None
+    } else {
+        Some(dirs)
+    }
 }
 
-fn populate_select(select: &mut SelectView<File>, path: String) {
-    match read_dir_custom(&path) {
+fn populate_select(select: &mut SelectView<File>, path: String, show_hidden: bool) {
+    select.clear();
+    match read_dir_custom(&path, show_hidden) {
         Some(files) => {
             for file in files {
                 let mut style = ColorStyle::terminal_default();
@@ -144,6 +154,36 @@ fn populate_select(select: &mut SelectView<File>, path: String) {
     }
 }
 
+fn init(s: &mut Cursive) {
+    let show_hidden = s.user_data::<State>().unwrap().show_hidden;
+    let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
+    let curr_select = curr_dialog
+        .get_content_mut()
+        .downcast_mut::<SelectView<File>>()
+        .unwrap();
+    populate_select(curr_select, String::from("./"), show_hidden);
+    
+    let mut prev_dialog: ViewRef<Dialog> = s.find_name("prev_dialog").unwrap();
+    let prev_select = prev_dialog
+        .get_content_mut()
+        .downcast_mut::<SelectView<File>>()
+        .unwrap();
+    populate_select(prev_select, String::from("../"), show_hidden);
+
+    let mut next_dialog: ViewRef<Dialog> = s.find_name("next_dialog").unwrap();
+    let next_select = next_dialog
+        .get_content_mut()
+        .downcast_mut::<SelectView<File>>()
+        .unwrap();
+    update_prev(prev_select);
+
+    let curr_selection = curr_select.selection().unwrap();
+    if curr_selection.is_dir {
+        populate_select(next_select, curr_selection.path.clone(), show_hidden)
+    }
+
+}
+
 fn main() {
     let mut siv = cursive::default();
     let mut theme = Theme::terminal_default();
@@ -159,22 +199,11 @@ fn main() {
     let state = State::new();
     siv.set_user_data(state);
 
-    let mut prev_select = SelectView::<File>::new().disabled();
-    let mut curr_select = SelectView::<File>::new();
-    let mut next_select = SelectView::<File>::new()
+    let prev_select = SelectView::<File>::new().disabled();
+    let curr_select = SelectView::<File>::new().on_select(update_next);
+    let next_select = SelectView::<File>::new()
         .disabled()
         .with_inactive_highlight(false);
-
-    populate_select(&mut prev_select, String::from("../"));
-    populate_select(&mut curr_select, String::from("./"));
-    update_prev(&mut prev_select);
-
-    let curr_selection = curr_select.selection().unwrap();
-    if curr_selection.is_dir {
-        populate_select(&mut next_select, curr_selection.path.clone())
-    }
-
-    curr_select.set_on_select(update_next);
 
     siv.add_fullscreen_layer(Layer::new(
         LinearLayout::vertical()
@@ -205,8 +234,13 @@ fn main() {
                             .with_name("next_dialog")
                             .full_screen(),
                     ),
+            )
+            .child(
+                TextArea::new().disabled().with_name("search_text"),
             ),
     ));
+
+    init(&mut siv);
 
     siv.focus_name("curr_dialog").unwrap();
     siv.add_global_callback('q', |s| {
@@ -256,8 +290,12 @@ fn main() {
         let cb = curr_select.set_selection(0);
         cb(s);
     });
-    siv.add_global_callback('t', |s| {
+    siv.add_global_callback(Event::CtrlChar('h'), |s| {
         s.user_data::<State>().unwrap().show_hidden ^= true;
+        init(s);
+    });
+    siv.add_global_callback('/', |s| {
+        let mut search_text: ViewRef<TextArea> = s.find_name("search_text").unwrap();
     });
 
     siv.run();
