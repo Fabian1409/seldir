@@ -163,7 +163,7 @@ fn submit_search(s: &mut Cursive, text: &str) {
         .get_inner_mut();
     let query = text.replace("search: ", "").to_ascii_lowercase();
     let result = curr_select.iter()
-        .find(|x| x.0.to_ascii_lowercase().eq(&query));
+        .find(|x| x.0.to_ascii_lowercase().eq(&query) || x.0.starts_with(&query));
     if let Some(item) = result {
         let item_id = curr_select.iter().position(|x| x.0.eq(item.0)).unwrap();
         let cb = curr_select.set_selection(item_id);
