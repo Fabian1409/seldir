@@ -1,8 +1,8 @@
 use cursive::event::{Event, Key};
 use cursive::theme::{BorderStyle, Color, ColorStyle, Theme};
 use cursive::utils::markup::StyledString;
-use cursive::view::{Margins, Nameable, Resizable, Scrollable};
-use cursive::views::{Dialog, EditView, Layer, LinearLayout, SelectView, TextView, ViewRef, ScrollView};
+use cursive::view::{Nameable, Resizable, Scrollable};
+use cursive::views::{EditView, Layer, LinearLayout, SelectView, TextView, ViewRef, ScrollView, ShadowView};
 use cursive::Cursive;
 use std::cmp::Ordering;
 use std::env;
@@ -36,18 +36,10 @@ impl File {
 }
 
 fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
-    let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-    let mut prev_dialog: ViewRef<Dialog> = s.find_name("prev_dialog").unwrap();
-    let curr_select = curr_dialog
-        .get_content_mut()
-        .downcast_mut::<ScrollView<SelectView<File>>>()
-        .unwrap()
-        .get_inner_mut();
-    let prev_scroll_view = prev_dialog
-        .get_content_mut()
-        .downcast_mut::<ScrollView<SelectView<File>>>()
-        .unwrap();
-    let prev_select = prev_scroll_view.get_inner_mut();
+    let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+    let curr_select = curr.get_inner_mut();
+    let mut prev: ViewRef<ScrollView<SelectView<File>>> = s.find_name("prev").unwrap();
+    let prev_select = prev.get_inner_mut();
 
     if is_enter {
         let selection = curr_select.selection().unwrap();
@@ -66,22 +58,18 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
     populate_select(curr_select, String::from("./"), show_hidden);
     update_next(s, &curr_select.selection().unwrap());
     update_prev(prev_select);
-    prev_scroll_view.scroll_to_important_area();
+    prev.scroll_to_important_area();
 
     let mut path_text: ViewRef<TextView> = s.find_name("path_text").unwrap();
     path_text.set_content(env::current_dir().unwrap().to_str().unwrap());
 }
 
 fn update_next(s: &mut Cursive, item: &File) {
-    let mut next_dialog: ViewRef<Dialog> = s.find_name("next_dialog").unwrap();
-    let next_select = next_dialog
-        .get_content_mut()
-        .downcast_mut::<SelectView<File>>()
-        .unwrap();
+    let mut next_select: ViewRef<SelectView<File>> = s.find_name("next").unwrap();
     next_select.clear();
     if item.is_dir {
         let show_hidden = s.user_data::<State>().unwrap().show_hidden;
-        populate_select(next_select, item.path.clone(), show_hidden);
+        populate_select(&mut next_select, item.path.clone(), show_hidden);
     }
 }
 
@@ -155,12 +143,8 @@ fn populate_select(select: &mut SelectView<File>, path: String, show_hidden: boo
 }
 
 fn submit_search(s: &mut Cursive, text: &str) {
-    let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-    let curr_select = curr_dialog
-        .get_content_mut()
-        .downcast_mut::<ScrollView<SelectView<File>>>()
-        .unwrap()
-        .get_inner_mut();
+    let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+    let curr_select = curr.get_inner_mut();
     let query = text.replace("search: ", "").to_ascii_lowercase();
     let result = curr_select.iter()
         .find(|x| x.0.to_ascii_lowercase().eq(&query) || x.0.starts_with(&query));
@@ -176,33 +160,20 @@ fn submit_search(s: &mut Cursive, text: &str) {
 
 fn init(s: &mut Cursive) {
     let show_hidden = s.user_data::<State>().unwrap().show_hidden;
-    let mut curr_dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-    let curr_select = curr_dialog
-        .get_content_mut()
-        .downcast_mut::<ScrollView<SelectView<File>>>()
-        .unwrap()
-        .get_inner_mut();
+    let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+    let curr_select = curr.get_inner_mut();
     populate_select(curr_select, String::from("./"), show_hidden);
 
-    let mut prev_dialog: ViewRef<Dialog> = s.find_name("prev_dialog").unwrap();
-    let prev_scroll_view = prev_dialog
-        .get_content_mut()
-        .downcast_mut::<ScrollView<SelectView<File>>>()
-        .unwrap();
-    let prev_select = prev_scroll_view.get_inner_mut();
+    let mut prev: ViewRef<ScrollView<SelectView<File>>> = s.find_name("prev").unwrap();
+    let prev_select = prev.get_inner_mut();
     populate_select(prev_select, String::from("../"), show_hidden);
     update_prev(prev_select);
-    prev_scroll_view.scroll_to_important_area();
+    prev.scroll_to_important_area();
 
-    let mut next_dialog: ViewRef<Dialog> = s.find_name("next_dialog").unwrap();
-    let next_select = next_dialog
-        .get_content_mut()
-        .downcast_mut::<SelectView<File>>()
-        .unwrap();
-
-    let curr_selection = curr_select.selection().unwrap();
+    let mut next_select: ViewRef<SelectView<File>> = s.find_name("next").unwrap();
+    let curr_selection = curr.get_inner().selection().unwrap();
     if curr_selection.is_dir {
-        populate_select(next_select, curr_selection.path.clone(), show_hidden)
+        populate_select(&mut next_select, curr_selection.path.clone(), show_hidden)
     }
 }
 
@@ -219,17 +190,17 @@ fn main() {
     let state = State::new();
     siv.set_user_data(state);
 
-    let prev_select = SelectView::<File>::new()
-        .disabled()
-        .scrollable()
-        .show_scrollbars(false);
-    let curr_select = SelectView::<File>::new()
-        .on_select(update_next)
-        .scrollable()
-        .show_scrollbars(false);
-    let next_select = SelectView::<File>::new()
-        .disabled()
-        .with_inactive_highlight(false);
+    // let prev_select = SelectView::<File>::new()
+    //     .disabled()
+    //     .scrollable()
+    //     .show_scrollbars(false);
+    // let curr_select = SelectView::<File>::new()
+    //     .on_select(update_next)
+    //     .scrollable()
+    //     .show_scrollbars(false);
+    // let next_select = SelectView::<File>::new()
+    //     .disabled()
+    //     .with_inactive_highlight(false);
 
     siv.add_fullscreen_layer(Layer::new(
         LinearLayout::vertical()
@@ -240,27 +211,35 @@ fn main() {
             .child(
                 LinearLayout::horizontal()
                     .child(
-                        Dialog::new()
-                            .padding(Margins::zeroes())
-                            .content(prev_select)
-                            .with_name("prev_dialog")
-                            .full_height()
-                            .fixed_width(20),
+                        ShadowView::new(
+                            SelectView::<File>::new()
+                                .disabled()
+                                .scrollable()
+                                .show_scrollbars(false)
+                                .with_name("prev")
+                                .full_height()
+                                .fixed_width(20)
+                            ).top_padding(false).left_padding(false),
                     )
                     .child(
-                        Dialog::new()
-                            .padding(Margins::zeroes())
-                            .content(curr_select)
-                            .with_name("curr_dialog")
-                            .full_width(),
+                        ShadowView::new(
+                            SelectView::<File>::new()
+                                .on_select(update_next)
+                                .scrollable()
+                                .show_scrollbars(false)
+                                .with_name("curr")
+                                .full_width()
+                            ).top_padding(false),
                     )
                     .child(
-                        Dialog::new()
-                            .padding(Margins::zeroes())
-                            .content(next_select)
-                            .with_name("next_dialog")
-                            .full_screen(),
-                    ),
+                        ShadowView::new(
+                            SelectView::<File>::new()
+                                .disabled()
+                                .with_inactive_highlight(false)
+                                .with_name("next")
+                                .full_screen()
+                            ).top_padding(false),
+                    )
             )
             .child(
                 EditView::new()
@@ -275,33 +254,23 @@ fn main() {
 
     init(&mut siv);
 
-    siv.focus_name("curr_dialog").unwrap();
+    siv.focus_name("curr").unwrap();
     siv.add_global_callback('q', |s| {
         let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
         println!("{}", cwd);
         s.quit();
     });
     siv.add_global_callback('j', |s| {
-        let mut dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let scroll_view = dialog
-            .get_content_mut()
-            .downcast_mut::<ScrollView<SelectView<File>>>()
-            .unwrap();
-        let select = scroll_view.get_inner_mut();
-        let cb = select.select_down(1);
+        let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+        let cb = curr.get_inner_mut().select_down(1);
         cb(s);
-        scroll_view.scroll_to_important_area();
+        curr.scroll_to_important_area();
     });
     siv.add_global_callback('k', |s| {
-        let mut dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let scroll_view = dialog
-            .get_content_mut()
-            .downcast_mut::<ScrollView<SelectView<File>>>()
-            .unwrap();
-        let select = scroll_view.get_inner_mut();
-        let cb = select.select_up(1);
+        let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+        let cb = curr.get_inner_mut().select_up(1);
         cb(s);
-        scroll_view.scroll_to_important_area();
+        curr.scroll_to_important_area();
     });
     siv.add_global_callback('l', |s| {
         update_prev_curr(s, true);
@@ -310,26 +279,17 @@ fn main() {
         update_prev_curr(s, false);
     });
     siv.add_global_callback('G', |s| {
-        let mut dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let scroll_view = dialog
-            .get_content_mut()
-            .downcast_mut::<ScrollView<SelectView<File>>>()
-            .unwrap();
-        let select = scroll_view.get_inner_mut();
-        let cb = select.set_selection(select.len() - 1);
+        let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+        let curr_select = curr.get_inner_mut();
+        let cb = curr_select.set_selection(curr_select.len() - 1);
         cb(s);
-        scroll_view.scroll_to_important_area();
+        curr.scroll_to_important_area();
     });
     siv.add_global_callback('g', |s| {
-        let mut dialog: ViewRef<Dialog> = s.find_name("curr_dialog").unwrap();
-        let scroll_view = dialog
-            .get_content_mut()
-            .downcast_mut::<ScrollView<SelectView<File>>>()
-            .unwrap();
-        let select = scroll_view.get_inner_mut();
-        let cb = select.set_selection(0);
+        let mut curr: ViewRef<ScrollView<SelectView<File>>> = s.find_name("curr").unwrap();
+        let cb = curr.get_inner_mut().set_selection(0);
         cb(s);
-        scroll_view.scroll_to_important_area();
+        curr.scroll_to_important_area();
     });
     siv.add_global_callback(Event::CtrlChar('h'), |s| {
         s.user_data::<State>().unwrap().show_hidden ^= true;
