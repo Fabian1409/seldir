@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 cursive = "0.20.0"
+cursive-extras = { version = "0.9.3", features = ["image_view", "buffered_backend"]}
+pdf-extract = "0.6.4"

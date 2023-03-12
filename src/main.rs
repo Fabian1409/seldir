@@ -1,13 +1,17 @@
 use cursive::event::{Event, Key};
-use cursive::theme::{Color, ColorStyle, Theme, PaletteColor, BaseColor, ColorType};
+use cursive::theme::{BaseColor, Color, ColorStyle, ColorType, PaletteColor, Theme};
 use cursive::utils::markup::StyledString;
 use cursive::view::{Nameable, Resizable, Scrollable};
-use cursive::views::{EditView, Layer, LinearLayout, SelectView, TextView, ViewRef, ScrollView, ShadowView};
+use cursive::views::{
+    EditView, Layer, LinearLayout, ScrollView, SelectView, ShadowView, TextView, ViewRef,
+};
 use cursive::Cursive;
+use cursive_extras::{hlayout, vlayout, ImageView};
+use pdf_extract::extract_text;
 use std::cmp::Ordering;
+use std::fs::DirEntry;
 use std::path::Path;
 use std::{env, fs};
-use std::fs::DirEntry;
 
 struct State {
     show_hidden: bool,
@@ -27,12 +31,14 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
 
     if is_enter {
         let selection = curr_select.selection().unwrap();
-        if selection.path().is_dir() && fs::read_dir(selection.path()).is_ok() { // TODO handle empty dirs
+        if selection.path().is_dir() && fs::read_dir(selection.path()).is_ok() {
+            // TODO handle empty dirs
             env::set_current_dir(selection.path()).unwrap();
         } else {
             return;
         }
-    } else if env::current_dir().unwrap().ancestors().count() > 2 { // TODO handle going back to /
+    } else if env::current_dir().unwrap().ancestors().count() > 2 {
+        // TODO handle going back to /
         env::set_current_dir(env::current_dir().unwrap().parent().unwrap()).unwrap()
     } else {
         return;
@@ -40,7 +46,11 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
 
     let show_hidden = s.user_data::<State>().unwrap().show_hidden;
 
-    populate_select(prev_select, env::current_dir().unwrap().parent().unwrap(), show_hidden);
+    populate_select(
+        prev_select,
+        env::current_dir().unwrap().parent().unwrap(),
+        show_hidden,
+    );
     populate_select(curr_select, &env::current_dir().unwrap(), show_hidden);
     update_next(s, &curr_select.selection().unwrap());
     update_prev(prev_select);
@@ -51,20 +61,63 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
 }
 
 fn update_next(s: &mut Cursive, item: &DirEntry) {
-    let mut next_select: ViewRef<SelectView<DirEntry>> = s.find_name("next").unwrap();
-    next_select.clear();
+    let mut hlayout: ViewRef<LinearLayout> = s.find_name("hlayout").unwrap();
+    hlayout.remove_child(2);
     if item.path().is_dir() {
+        let mut next_select = SelectView::<DirEntry>::new()
+            .disabled()
+            .with_inactive_highlight(false);
+
         let show_hidden = s.user_data::<State>().unwrap().show_hidden;
         populate_select(&mut next_select, &item.path(), show_hidden);
+        hlayout.add_child(
+            ShadowView::new(next_select)
+                .top_padding(false)
+                .min_width(30),
+        );
+    } else {
+        let name = item.file_name();
+        let parts = name.to_str().unwrap().split('.').collect::<Vec<&str>>();
+        match parts[..] {
+            [_, "pdf"] => {
+                hlayout.add_child(
+                    ShadowView::new(
+                        TextView::new(extract_text(item.path()).unwrap_or("pdf".to_owned()))
+                            .min_width(50),
+                    )
+                    .top_padding(false),
+                );
+            }
+            [_, "png" | "jpg" | "jpeg"] => {
+                hlayout.add_child(
+                    ShadowView::new(
+                        ImageView::new(50, 18)
+                            .image(&item.path().to_string_lossy())
+                            .min_width(50),
+                    )
+                    .top_padding(false),
+                );
+            }
+            [_, _] | [_] => {
+                hlayout.add_child(
+                    ShadowView::new(
+                        TextView::new(
+                            fs::read_to_string(item.path()).unwrap_or("content".to_owned()),
+                        )
+                        .min_width(50),
+                    )
+                    .top_padding(false),
+                );
+            }
+            _ => todo!(),
+        };
     }
 }
 
 fn update_prev(prev_select: &mut SelectView<DirEntry>) {
     let id = prev_select
         .iter()
-        .position(|item| {
-            item.1.path().eq(&env::current_dir().unwrap())
-        })
+        .position(|item| item.1.path().eq(&env::current_dir().unwrap()))
         .unwrap();
     prev_select.set_selection(id);
 }
@@ -95,8 +148,8 @@ fn read_dir_sorted(path: &Path, show_hidden: bool) -> Vec<DirEntry> {
                 }
             });
             entries
-        },
-        Err(_) => vec![]
+        }
+        Err(_) => vec![],
     }
 }
 
@@ -108,7 +161,10 @@ fn populate_select(select: &mut SelectView<DirEntry>, path: &Path, show_hidden: 
         if e.path().is_dir() {
             style.front = ColorType::Color(Color::Dark(BaseColor::Red));
         }
-        select.add_item(StyledString::styled(e.path().file_name().unwrap().to_string_lossy(), style), e);
+        select.add_item(
+            StyledString::styled(e.path().file_name().unwrap().to_string_lossy(), style),
+            e,
+        );
     }
 }
 
@@ -116,8 +172,9 @@ fn submit_search(s: &mut Cursive, text: &str) {
     let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("curr").unwrap();
     let curr_select = curr.get_inner_mut();
     let query = text.replace("search: ", "").to_ascii_lowercase();
-    let result = curr_select.iter()
-        .find(|x| x.0.to_ascii_lowercase().eq(&query) || x.0.to_ascii_lowercase().starts_with(&query));
+    let result = curr_select.iter().find(|x| {
+        x.0.to_ascii_lowercase().eq(&query) || x.0.to_ascii_lowercase().starts_with(&query)
+    });
     if let Some(item) = result {
         let item_id = curr_select.iter().position(|x| x.0.eq(item.0)).unwrap();
         let cb = curr_select.set_selection(item_id);
@@ -136,19 +193,21 @@ fn init(s: &mut Cursive) {
 
     let mut prev: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("prev").unwrap();
     let prev_select = prev.get_inner_mut();
-    populate_select(prev_select, env::current_dir().unwrap().parent().unwrap(), show_hidden);
+    populate_select(
+        prev_select,
+        env::current_dir().unwrap().parent().unwrap(),
+        show_hidden,
+    );
     update_prev(prev_select);
     prev.scroll_to_important_area();
 
-    let mut next_select: ViewRef<SelectView<DirEntry>> = s.find_name("next").unwrap();
     let curr_selection = curr.get_inner().selection().unwrap();
-    if curr_selection.path().is_dir() {
-        populate_select(&mut next_select, &curr_selection.path(), show_hidden)
-    }
+    update_next(s, &curr_selection);
 }
 
 fn main() {
     let mut siv = cursive::default();
+    // let mut siv = cursive_extras::buffered_backend_root();
 
     let mut theme = Theme::terminal_default();
     theme.palette[PaletteColor::Highlight] = Color::Dark(BaseColor::Red);
@@ -158,62 +217,45 @@ fn main() {
     let state = State::new();
     siv.set_user_data(state);
 
-    siv.add_fullscreen_layer(Layer::new(
-        LinearLayout::vertical()
-            .child(
-                TextView::new(env::current_dir().unwrap().to_string_lossy())
-                    .with_name("path_text"),
-            )
-            .child(
-                LinearLayout::horizontal()
-                    .child(
-                        ShadowView::new(
-                            SelectView::<DirEntry>::new()
-                                .disabled()
-                                .scrollable()
-                                .show_scrollbars(false)
-                                .with_name("prev")
-                                .full_height()
-                                .fixed_width(20)
-                            ).top_padding(false).left_padding(false),
-                    )
-                    .child(
-                        ShadowView::new(
-                            SelectView::<DirEntry>::new()
-                                .on_select(update_next)
-                                .scrollable()
-                                .show_scrollbars(false)
-                                .with_name("curr")
-                                .full_width()
-                            ).top_padding(false),
-                    )
-                    .child(
-                        ShadowView::new(
-                            SelectView::<DirEntry>::new()
-                                .disabled()
-                                .with_inactive_highlight(false)
-                                .with_name("next")
-                                .full_screen()
-                            ).top_padding(false),
-                    )
-            )
-            .child(
-                EditView::new()
+    siv.add_fullscreen_layer(Layer::new(vlayout!(
+        TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name("path_text"),
+        hlayout!(
+            ShadowView::new(
+                SelectView::<DirEntry>::new()
                     .disabled()
-                    .filler(" ")
-                    .on_submit(submit_search)
-                    // .style(ColorStyle::new(BaseColor::White, BaseColor::Black))
-                    .with_name("search")
-                    .fixed_height(1),
-            ),
-    ));
+                    .scrollable()
+                    .show_scrollbars(false)
+                    .with_name("prev")
+                    .fixed_width(15)
+            )
+            .top_padding(false)
+            .left_padding(false),
+            ShadowView::new(
+                SelectView::<DirEntry>::new()
+                    .on_select(update_next)
+                    .scrollable()
+                    .show_scrollbars(false)
+                    .with_name("curr")
+                    .min_width(30)
+            )
+            .top_padding(false)
+        )
+        .with_name("hlayout")
+        .full_height(),
+        EditView::new()
+            .disabled()
+            .filler(" ")
+            .on_submit(submit_search)
+            .with_name("search")
+            .fixed_height(1)
+    )));
 
     init(&mut siv);
 
     siv.focus_name("curr").unwrap();
     siv.add_global_callback('q', |s| {
         let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
-        println!("{}", cwd);
+        fs::write("/tmp/seldir", cwd).unwrap();
         s.quit();
     });
     siv.add_global_callback('j', |s| {
