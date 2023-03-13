@@ -29,6 +29,8 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
     let mut prev: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("prev").unwrap();
     let prev_select = prev.get_inner_mut();
 
+    let curr_selection = prev_select.selected_id().unwrap();
+
     if is_enter {
         let selection = curr_select.selection().unwrap();
         if selection.path().is_dir() && fs::read_dir(selection.path()).is_ok() {
@@ -51,7 +53,12 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
         env::current_dir().unwrap().parent().unwrap(),
         show_hidden,
     );
+
     populate_select(curr_select, &env::current_dir().unwrap(), show_hidden);
+    if !is_enter {
+        curr_select.set_selection(curr_selection);
+    }
+
     update_next(s, &curr_select.selection().unwrap());
     update_prev(prev_select);
     prev.scroll_to_important_area();
