@@ -29,18 +29,19 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
     let mut prev: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("prev").unwrap();
     let prev_select = prev.get_inner_mut();
 
-    let curr_selection = prev_select.selected_id().unwrap();
+    let prev_selection = prev_select.selected_id();
 
     if is_enter {
+        if fs::read_dir(env::current_dir().unwrap()).unwrap().count() == 0 {
+            return;
+        }
         let selection = curr_select.selection().unwrap();
         if selection.path().is_dir() && fs::read_dir(selection.path()).is_ok() {
-            // TODO handle empty dirs
             env::set_current_dir(selection.path()).unwrap();
         } else {
             return;
         }
-    } else if env::current_dir().unwrap().ancestors().count() > 2 {
-        // TODO handle going back to /
+    } else if env::current_dir().unwrap().ancestors().count() > 1 {
         env::set_current_dir(env::current_dir().unwrap().parent().unwrap()).unwrap()
     } else {
         return;
@@ -48,20 +49,35 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
 
     let show_hidden = s.user_data::<State>().unwrap().show_hidden;
 
-    populate_select(
-        prev_select,
-        env::current_dir().unwrap().parent().unwrap(),
-        show_hidden,
-    );
+    if env::current_dir().unwrap().ancestors().count() <= 1 {
+        prev_select.clear();
+    } else {
+        populate_select(
+            prev_select,
+            env::current_dir().unwrap().parent().unwrap(),
+            show_hidden,
+        );
+        update_prev(prev_select);
+        prev.scroll_to_important_area();
+    }
+
+    if fs::read_dir(env::current_dir().unwrap()).unwrap().count() == 0 {
+        curr_select.clear();
+        return;
+    }
 
     populate_select(curr_select, &env::current_dir().unwrap(), show_hidden);
     if !is_enter {
-        curr_select.set_selection(curr_selection);
+        curr_select.set_selection(prev_selection.unwrap());
     }
 
-    update_next(s, &curr_select.selection().unwrap());
-    update_prev(prev_select);
-    prev.scroll_to_important_area();
+    match curr_select.selection() {
+        Some(item) => update_next(s, &item),
+        None => {
+            let mut next: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("next").unwrap();
+            next.get_inner_mut().clear();
+        }
+    }
 
     let mut path_text: ViewRef<TextView> = s.find_name("path_text").unwrap();
     path_text.set_content(env::current_dir().unwrap().to_str().unwrap());
