@@ -9,3 +9,6 @@ edition = "2021"
 cursive = "0.20.0"
 cursive-extras = { version = "0.9.3", features = ["image_view", "buffered_backend"]}
 pdf-extract = "0.6.4"
+cursive_hexview = "0.7.0"
+cursive-async-view = "0.6.0"
+cursive-syntect = "0.1.0"

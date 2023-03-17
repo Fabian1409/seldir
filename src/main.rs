@@ -7,6 +7,7 @@ use cursive::views::{
 };
 use cursive::Cursive;
 use cursive_extras::{hlayout, vlayout, ImageView};
+use cursive_hexview::HexView;
 use pdf_extract::extract_text;
 use std::cmp::Ordering;
 use std::fs::DirEntry;
@@ -42,7 +43,7 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
             return;
         }
     } else if env::current_dir().unwrap().ancestors().count() > 1 {
-        env::set_current_dir(env::current_dir().unwrap().parent().unwrap()).unwrap()
+        env::set_current_dir(env::current_dir().unwrap().parent().unwrap()).unwrap();
     } else {
         return;
     }
@@ -78,13 +79,16 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
             next.get_inner_mut().clear();
         }
     }
-
-    let mut path_text: ViewRef<TextView> = s.find_name("path_text").unwrap();
-    path_text.set_content(env::current_dir().unwrap().to_str().unwrap());
 }
 
 fn update_next(s: &mut Cursive, item: &DirEntry) {
     let mut hlayout: ViewRef<LinearLayout> = s.find_name("hlayout").unwrap();
+    let mut path_text: ViewRef<TextView> = s.find_name("path_text").unwrap();
+    path_text.set_content(format!(
+        "{}/{}",
+        env::current_dir().unwrap().to_string_lossy(),
+        item.file_name().to_string_lossy()
+    ));
     hlayout.remove_child(2);
     if item.path().is_dir() {
         let mut next_select = SelectView::<DirEntry>::new()
@@ -100,18 +104,16 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
         );
     } else {
         let name = item.file_name();
-        let parts = name.to_str().unwrap().split('.').collect::<Vec<&str>>();
-        match parts[..] {
-            [_, "pdf"] => {
+        let file_ext = name.to_str().unwrap().split('.').last().unwrap();
+        match file_ext {
+            "pdf" => {
+                let mut data = extract_text(item.path()).unwrap_or("pdf".to_owned());
+                data.truncate(1_000);
                 hlayout.add_child(
-                    ShadowView::new(
-                        TextView::new(extract_text(item.path()).unwrap_or("pdf".to_owned()))
-                            .min_width(50),
-                    )
-                    .top_padding(false),
+                    ShadowView::new(TextView::new(data).min_width(50)).top_padding(false),
                 );
             }
-            [_, "png" | "jpg" | "jpeg"] => {
+            "png" | "jpg" | "jpeg" => {
                 hlayout.add_child(
                     ShadowView::new(
                         ImageView::new(50, 18)
@@ -121,18 +123,18 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
                     .top_padding(false),
                 );
             }
-            [_, _] | [_] => {
-                hlayout.add_child(
-                    ShadowView::new(
-                        TextView::new(
-                            fs::read_to_string(item.path()).unwrap_or("content".to_owned()),
-                        )
-                        .min_width(50),
-                    )
-                    .top_padding(false),
-                );
-            }
-            _ => todo!(),
+            _ => match fs::read_to_string(item.path()) {
+                Ok(mut text) => {
+                    text.truncate(1_000);
+                    hlayout.add_child(ShadowView::new(TextView::new(text)).top_padding(false))
+                }
+                Err(_) => {
+                    let mut data = fs::read(item.path()).unwrap();
+                    data.truncate(1_000);
+                    hlayout
+                        .add_child(ShadowView::new(HexView::new_from_iter(data)).top_padding(false))
+                }
+            },
         };
     }
 }
