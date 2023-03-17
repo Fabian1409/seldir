@@ -14,18 +14,10 @@ use std::fs::DirEntry;
 use std::path::Path;
 use std::{env, fs};
 
+#[derive(Default)]
 struct State {
     show_hidden: bool,
     pressed_g: bool,
-}
-
-impl State {
-    fn new() -> State {
-        State {
-            show_hidden: false,
-            pressed_g: false,
-        }
-    }
 }
 
 fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
@@ -243,7 +235,7 @@ fn main() {
     theme.palette[PaletteColor::HighlightInactive] = Color::Dark(BaseColor::Red);
     siv.set_theme(theme);
 
-    let state = State::new();
+    let state = State::default();
     siv.set_user_data(state);
 
     siv.add_fullscreen_layer(Layer::new(vlayout!(
@@ -326,6 +318,7 @@ fn main() {
     });
     siv.add_global_callback(Event::CtrlChar('h'), |s| {
         s.user_data::<State>().unwrap().show_hidden ^= true;
+        // TODO fix selection not the same
         init(s);
     });
     siv.add_global_callback('/', |s| {
