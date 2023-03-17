@@ -16,11 +16,15 @@ use std::{env, fs};
 
 struct State {
     show_hidden: bool,
+    pressed_g: bool,
 }
 
 impl State {
     fn new() -> State {
-        State { show_hidden: false }
+        State {
+            show_hidden: false,
+            pressed_g: false,
+        }
     }
 }
 
@@ -309,10 +313,16 @@ fn main() {
         curr.scroll_to_important_area();
     });
     siv.add_global_callback('g', |s| {
-        let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("curr").unwrap();
-        let cb = curr.get_inner_mut().set_selection(0);
-        cb(s);
-        curr.scroll_to_important_area();
+        let pressed_g = s.user_data::<State>().unwrap().pressed_g;
+        if pressed_g {
+            let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("curr").unwrap();
+            let cb = curr.get_inner_mut().set_selection(0);
+            cb(s);
+            curr.scroll_to_important_area();
+            s.user_data::<State>().unwrap().pressed_g = false;
+        } else {
+            s.user_data::<State>().unwrap().pressed_g = true;
+        }
     });
     siv.add_global_callback(Event::CtrlChar('h'), |s| {
         s.user_data::<State>().unwrap().show_hidden ^= true;
