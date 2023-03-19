@@ -286,8 +286,22 @@ fn main() {
 
     siv.focus_name("curr").unwrap();
     siv.add_global_callback('q', |s| {
-        let cwd = env::current_dir().unwrap().to_str().unwrap().to_owned();
-        fs::write("/tmp/seldir", cwd).unwrap();
+        let curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name("curr").unwrap();
+        let selection = curr.get_inner().selection();
+        let path = match selection {
+            Some(dir) => {
+                if dir.metadata().unwrap().is_dir() {
+                    dir.path()
+                } else {
+                    env::current_dir().unwrap()
+                }
+            }
+            None => env::current_dir().unwrap(),
+        }
+        .to_str()
+        .unwrap()
+        .to_owned();
+        fs::write("/tmp/seldir", path).unwrap();
         s.quit();
     });
     siv.add_global_callback('j', |s| {
@@ -342,8 +356,12 @@ fn main() {
     });
     siv.add_global_callback(Event::Key(Key::Esc), |s| {
         let mut search: ViewRef<EditView> = s.find_name("search").unwrap();
-        search.set_content("");
-        search.disable();
+        if search.is_enabled() {
+            search.set_content("");
+            search.disable();
+        } else {
+            s.quit();
+        }
     });
 
     siv.run();
