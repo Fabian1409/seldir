@@ -6,6 +6,7 @@ use cursive::views::{
     EditView, Layer, LinearLayout, ScrollView, SelectView, ShadowView, TextView, ViewRef,
 };
 use cursive::Cursive;
+use cursive_async_view::AsyncView;
 use cursive_extras::{hlayout, vlayout, ImageView};
 use cursive_hexview::HexView;
 use pdf_extract::extract_text;
@@ -103,10 +104,20 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
         let file_ext = name.to_str().unwrap().split('.').last().unwrap();
         match file_ext {
             "pdf" => {
-                let mut data = extract_text(item.path()).unwrap_or("pdf".to_owned());
-                data.truncate(1_000);
+                let path = item.path();
                 hlayout.add_child(
-                    ShadowView::new(TextView::new(data).min_width(50)).top_padding(false),
+                    ShadowView::new(
+                        AsyncView::new_with_bg_creator(
+                            s,
+                            move || {
+                                let data = extract_text(path).unwrap_or("pdf".to_owned());
+                                Ok(data)
+                            },
+                            TextView::new,
+                        )
+                        .min_width(50),
+                    )
+                    .top_padding(false),
                 );
             }
             "png" | "jpg" | "jpeg" => {
@@ -222,7 +233,7 @@ fn init(s: &mut Cursive) {
     update_prev(prev_select);
     prev.scroll_to_important_area();
 
-    let curr_selection = curr.get_inner().selection().unwrap();
+    let curr_selection = curr_select.selection().unwrap();
     update_next(s, &curr_selection);
 }
 
