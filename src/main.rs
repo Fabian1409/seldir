@@ -26,30 +26,9 @@ struct State {
     pressed_g: bool,
 }
 
-fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
-    let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
-    let curr_select = curr.get_inner_mut();
+fn update_prev(s: &mut Cursive) {
     let mut prev: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(PREV_NAME).unwrap();
     let prev_select = prev.get_inner_mut();
-
-    let prev_selection = prev_select.selected_id();
-
-    if is_enter {
-        if fs::read_dir(env::current_dir().unwrap()).unwrap().count() == 0 {
-            return;
-        }
-        let selection = curr_select.selection().unwrap();
-        if selection.path().is_dir() && fs::read_dir(selection.path()).is_ok() {
-            env::set_current_dir(selection.path()).unwrap();
-        } else {
-            return;
-        }
-    } else if env::current_dir().unwrap().ancestors().count() > 1 {
-        env::set_current_dir(env::current_dir().unwrap().parent().unwrap()).unwrap();
-    } else {
-        return;
-    }
-
     if env::current_dir().unwrap().ancestors().count() <= 1 {
         prev_select.clear();
     } else {
@@ -61,13 +40,40 @@ fn update_prev_curr(s: &mut Cursive, is_enter: bool) {
         update_prev_selection(prev_select);
         prev.scroll_to_important_area();
     }
+}
 
-    if fs::read_dir(env::current_dir().unwrap()).unwrap().count() == 0 {
+fn update_curr(s: &mut Cursive, is_enter: bool) {
+    let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
+    let curr_select = curr.get_inner_mut();
+    let prev: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(PREV_NAME).unwrap();
+    let prev_selection = prev.get_inner().selected_id();
+    let current_dir = env::current_dir().unwrap();
+
+    if is_enter {
+        if fs::read_dir(current_dir).unwrap().count() == 0 {
+            return;
+        }
+        let selection = curr_select.selection().unwrap();
+        if selection.path().is_dir() && fs::read_dir(selection.path()).is_ok() {
+            env::set_current_dir(selection.path()).unwrap();
+        } else {
+            return;
+        }
+    } else if current_dir.ancestors().count() > 1 {
+        env::set_current_dir(current_dir.parent().unwrap()).unwrap();
+    } else {
+        return;
+    }
+
+    // now in new dir
+    let current_dir = env::current_dir().unwrap();
+
+    if fs::read_dir(&current_dir).unwrap().count() == 0 {
         curr_select.clear();
         return;
     }
 
-    populate_select(s, curr_select, &env::current_dir().unwrap());
+    populate_select(s, curr_select, &current_dir);
     if !is_enter {
         curr_select.set_selection(prev_selection.unwrap());
     }
@@ -212,7 +218,7 @@ fn handle_exit(s: &mut Cursive) {
     .to_str()
     .unwrap()
     .to_owned();
-    fs::write("/tmp/seldir", path).unwrap();
+    println!("{}", path);
     s.quit();
 }
 
@@ -284,8 +290,14 @@ fn main() {
         cb(s);
         curr.scroll_to_important_area();
     });
-    siv.add_global_callback('l', |s| update_prev_curr(s, true));
-    siv.add_global_callback('h', |s| update_prev_curr(s, false));
+    siv.add_global_callback('l', |s| {
+        update_curr(s, true);
+        update_prev(s);
+    });
+    siv.add_global_callback('h', |s| {
+        update_curr(s, false);
+        update_prev(s);
+    });
     siv.add_global_callback('G', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
         let curr_select = curr.get_inner_mut();
