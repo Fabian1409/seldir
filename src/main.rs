@@ -277,6 +277,7 @@ fn main() {
 
     siv.focus_name("curr").unwrap();
     siv.add_global_callback('q', |s| handle_exit(s, true));
+    siv.add_global_callback(Key::Enter, |s| handle_exit(s, true));
     siv.add_global_callback('Q', |s| handle_exit(s, false));
     siv.add_global_callback('j', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
