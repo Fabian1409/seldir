@@ -202,12 +202,12 @@ fn init(s: &mut Cursive) {
     update_next(s, &curr_selection);
 }
 
-fn handle_exit(s: &mut Cursive) {
+fn handle_exit(s: &mut Cursive, include_selection: bool) {
     let curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
     let selection = curr.get_inner().selection();
     let path = match selection {
         Some(dir) => {
-            if dir.metadata().unwrap().is_dir() {
+            if dir.metadata().unwrap().is_dir() && include_selection {
                 dir.path()
             } else {
                 env::current_dir().unwrap()
@@ -276,8 +276,8 @@ fn main() {
     init(&mut siv);
 
     siv.focus_name("curr").unwrap();
-    siv.add_global_callback('q', handle_exit);
-    siv.add_global_callback(Key::Enter, handle_exit);
+    siv.add_global_callback('q', |s| handle_exit(s, true));
+    siv.add_global_callback('Q', |s| handle_exit(s, false));
     siv.add_global_callback('j', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
         let cb = curr.get_inner_mut().select_down(1);
@@ -294,7 +294,15 @@ fn main() {
         update_curr(s, true);
         update_prev(s);
     });
+    siv.add_global_callback(Key::Right, |s| {
+        update_curr(s, true);
+        update_prev(s);
+    });
     siv.add_global_callback('h', |s| {
+        update_curr(s, false);
+        update_prev(s);
+    });
+    siv.add_global_callback(Key::Left, |s| {
         update_curr(s, false);
         update_prev(s);
     });
