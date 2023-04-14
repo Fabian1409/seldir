@@ -1,10 +1,11 @@
 use clap::{arg, command};
+use cursive::align::HAlign;
 use cursive::event::{Event, Key};
 use cursive::theme::{Color, ColorStyle, ColorType, PaletteColor, Theme};
 use cursive::utils::markup::StyledString;
 use cursive::view::{Nameable, Resizable, Scrollable};
 use cursive::views::{
-    EditView, Layer, LinearLayout, ScrollView, SelectView, ShadowView, TextView, ViewRef,
+    EditView, Layer, LinearLayout, Panel, ScrollView, SelectView, ShadowView, TextView, ViewRef,
 };
 use cursive::Cursive;
 use cursive_extras::{hlayout, vlayout};
@@ -17,8 +18,11 @@ const CURR_NAME: &str = "curr";
 const PREV_NAME: &str = "prev";
 const NEXT_NAME: &str = "next";
 const SEARCH_NAME: &str = "search";
+const SEARCH_BAR_NAME: &str = "search_bar";
 const HLAYOUT_NAME: &str = "hlayout";
+const VLAYOUT_NAME: &str = "vlayout";
 const PATH_TEXT_NAME: &str = "path_text";
+const HELP_NAME: &str = "help";
 
 #[derive(Default)]
 struct State {
@@ -166,10 +170,10 @@ fn populate_select(s: &mut Cursive, select: &mut SelectView<DirEntry>, path: &Pa
     }
 }
 
-fn submit_search(s: &mut Cursive, text: &str) {
+fn search(s: &mut Cursive, text: &str) {
     let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
     let curr_select = curr.get_inner_mut();
-    let query = text.replace("search: ", "").to_ascii_lowercase();
+    let query = text.to_ascii_lowercase();
     let result = curr_select.iter().find(|x| {
         x.0.to_ascii_lowercase().eq(&query) || x.0.to_ascii_lowercase().starts_with(&query)
     });
@@ -177,9 +181,6 @@ fn submit_search(s: &mut Cursive, text: &str) {
         let item_id = curr_select.iter().position(|x| x.0.eq(item.0)).unwrap();
         let cb = curr_select.set_selection(item_id);
         cb(s);
-        let mut search: ViewRef<EditView> = s.find_name(SEARCH_NAME).unwrap();
-        search.set_content("");
-        search.disable();
     }
 }
 
@@ -240,38 +241,36 @@ fn main() {
     let state = State::default();
     siv.set_user_data(state);
 
-    siv.add_fullscreen_layer(Layer::new(vlayout!(
-        TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name(PATH_TEXT_NAME),
-        hlayout!(
-            ShadowView::new(
-                SelectView::<DirEntry>::new()
-                    .disabled()
-                    .scrollable()
-                    .show_scrollbars(false)
-                    .with_name(PREV_NAME)
-                    .fixed_width(15)
+    siv.add_fullscreen_layer(Layer::new(
+        vlayout!(
+            TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name(PATH_TEXT_NAME),
+            hlayout!(
+                ShadowView::new(
+                    SelectView::<DirEntry>::new()
+                        .disabled()
+                        .scrollable()
+                        .show_scrollbars(false)
+                        .with_name(PREV_NAME)
+                        .fixed_width(15)
+                )
+                .top_padding(false)
+                .left_padding(false),
+                ShadowView::new(
+                    SelectView::<DirEntry>::new()
+                        .on_select(update_next)
+                        .scrollable()
+                        .show_scrollbars(false)
+                        .with_name(CURR_NAME)
+                        .min_width(30)
+                )
+                .top_padding(false)
             )
-            .top_padding(false)
-            .left_padding(false),
-            ShadowView::new(
-                SelectView::<DirEntry>::new()
-                    .on_select(update_next)
-                    .scrollable()
-                    .show_scrollbars(false)
-                    .with_name(CURR_NAME)
-                    .min_width(30)
-            )
-            .top_padding(false)
+            .with_name(HLAYOUT_NAME)
+            .full_height()
         )
-        .with_name(HLAYOUT_NAME)
-        .full_height(),
-        EditView::new()
-            .disabled()
-            .filler(" ")
-            .on_submit(submit_search)
-            .with_name(SEARCH_NAME)
-            .fixed_height(1)
-    )));
+        .with_name(VLAYOUT_NAME)
+        .full_width(),
+    ));
 
     init(&mut siv);
 
@@ -279,6 +278,19 @@ fn main() {
     siv.add_global_callback('q', |s| handle_exit(s, true));
     siv.add_global_callback(Key::Enter, |s| handle_exit(s, true));
     siv.add_global_callback('Q', |s| handle_exit(s, false));
+    siv.add_global_callback(' ', |s| {
+        let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
+        if let Some(id) = vlayout.find_child_from_name(HELP_NAME) {
+            vlayout.remove_child(id);
+        } else {
+            vlayout.add_child(
+                Panel::new(TextView::new("helpful stuff"))
+                    .title("help")
+                    .title_position(HAlign::Left)
+                    .with_name(HELP_NAME),
+            );
+        }
+    });
     siv.add_global_callback('j', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
         let cb = curr.get_inner_mut().select_down(1);
@@ -333,18 +345,28 @@ fn main() {
         init(s);
     });
     siv.add_global_callback('/', |s| {
-        let mut search: ViewRef<EditView> = s.find_name(SEARCH_NAME).unwrap();
-        let text = "search: ";
-        search.set_content(text);
-        search.set_cursor(text.len());
-        search.enable();
-        s.focus_name(SEARCH_NAME).unwrap();
+        let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
+        vlayout.add_child(
+            hlayout!(
+                TextView::new("search: "),
+                EditView::new()
+                    .filler(" ")
+                    .on_edit(|s, text, _| search(s, text))
+                    .with_name(SEARCH_NAME)
+                    .full_width()
+                    .fixed_height(1)
+            )
+            .with_name(SEARCH_BAR_NAME),
+        );
+
+        // workaround because focus_name() fails
+        vlayout.set_focus_index(2).unwrap();
+        // s.focus_name(SEARCH_NAME).unwrap();
     });
     siv.add_global_callback(Event::Key(Key::Esc), |s| {
-        let mut search: ViewRef<EditView> = s.find_name(SEARCH_NAME).unwrap();
-        if search.is_enabled() {
-            search.set_content("");
-            search.disable();
+        let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
+        if let Some(id) = vlayout.find_child_from_name(SEARCH_BAR_NAME) {
+            vlayout.remove_child(id);
         } else {
             s.quit();
         }
