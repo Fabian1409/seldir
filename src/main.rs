@@ -1,3 +1,4 @@
+use bit::BitIndex;
 use clap::{arg, command};
 use cursive::align::HAlign;
 use cursive::event::{Event, Key};
@@ -5,12 +6,13 @@ use cursive::theme::{Color, ColorStyle, ColorType, PaletteColor, Theme};
 use cursive::utils::markup::StyledString;
 use cursive::view::{Nameable, Resizable, Scrollable};
 use cursive::views::{
-    EditView, Layer, LinearLayout, Panel, ScrollView, SelectView, ShadowView, TextView, ViewRef,
+    EditView, Layer, LinearLayout, ScrollView, SelectView, ShadowView, TextView, ViewRef,
 };
 use cursive::Cursive;
 use cursive_extras::{hlayout, vlayout};
 use std::cmp::Ordering;
 use std::fs::DirEntry;
+use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
 use std::{env, fs};
 
@@ -18,16 +20,14 @@ const CURR_NAME: &str = "curr";
 const PREV_NAME: &str = "prev";
 const NEXT_NAME: &str = "next";
 const SEARCH_NAME: &str = "search";
-const SEARCH_BAR_NAME: &str = "search_bar";
 const HLAYOUT_NAME: &str = "hlayout";
 const VLAYOUT_NAME: &str = "vlayout";
 const PATH_TEXT_NAME: &str = "path_text";
-const HELP_NAME: &str = "help";
 
 #[derive(Default)]
 struct State {
     show_hidden: bool,
-    pressed_g: bool,
+    goto_mode: bool,
 }
 
 fn update_prev(s: &mut Cursive) {
@@ -92,15 +92,34 @@ fn update_curr(s: &mut Cursive, is_enter: bool) {
     }
 }
 
+fn get_symolic_permissions(permissions: u32) -> String {
+    let mut symbolic = String::new();
+    symbolic += if permissions.bit(14) { "d" } else { "-" };
+    for i in (0..9).step_by(3).rev() {
+        symbolic += if permissions.bit(i) { "r" } else { "-" };
+        symbolic += if permissions.bit(i + 1) { "w" } else { "-" };
+        symbolic += if permissions.bit(i + 2) { "x" } else { "-" };
+    }
+    return symbolic;
+}
+
 fn update_next(s: &mut Cursive, item: &DirEntry) {
     let mut hlayout: ViewRef<LinearLayout> = s.find_name(HLAYOUT_NAME).unwrap();
     let mut path_text: ViewRef<TextView> = s.find_name(PATH_TEXT_NAME).unwrap();
+    let mut permissions_text: ViewRef<TextView> = s.find_name("permissions_name").unwrap();
+    let mut num_text: ViewRef<TextView> = s.find_name("num_name").unwrap();
+
     path_text.set_content(format!(
         "{}/{}",
         env::current_dir().unwrap().to_string_lossy(),
         item.file_name().to_string_lossy()
     ));
+
+    // let permissions = item.metadata().unwrap().permissions().mode();
+    // permissions_text.set_content(get_symolic_permissions(permissions));
+
     hlayout.remove_child(2);
+
     if item.path().is_dir() {
         let mut next_select = SelectView::<DirEntry>::new()
             .disabled()
@@ -203,12 +222,12 @@ fn init(s: &mut Cursive) {
     update_next(s, &curr_selection);
 }
 
-fn handle_exit(s: &mut Cursive, include_selection: bool) {
+fn handle_exit(s: &mut Cursive) {
     let curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
     let selection = curr.get_inner().selection();
     let path = match selection {
         Some(dir) => {
-            if dir.metadata().unwrap().is_dir() && include_selection {
+            if dir.metadata().unwrap().is_dir() {
                 dir.path()
             } else {
                 env::current_dir().unwrap()
@@ -241,7 +260,7 @@ fn main() {
     let state = State::default();
     siv.set_user_data(state);
 
-    siv.add_fullscreen_layer(Layer::new(
+    siv.add_fullscreen_layer(Layer::new(vlayout!(
         vlayout!(
             TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name(PATH_TEXT_NAME),
             hlayout!(
@@ -270,27 +289,25 @@ fn main() {
         )
         .with_name(VLAYOUT_NAME)
         .full_width(),
-    ));
+        hlayout!(
+            TextView::new("")
+                .style(ColorStyle::front(accent_color))
+                .with_name("permissions_name")
+                .full_width(),
+            TextView::new("")
+                .h_align(HAlign::Right)
+                .with_name("num_name")
+                .full_width()
+        )
+        .fixed_height(1)
+    )));
 
     init(&mut siv);
 
     siv.focus_name("curr").unwrap();
-    siv.add_global_callback('q', |s| handle_exit(s, true));
-    siv.add_global_callback(Key::Enter, |s| handle_exit(s, true));
-    siv.add_global_callback('Q', |s| handle_exit(s, false));
-    siv.add_global_callback(' ', |s| {
-        let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
-        if let Some(id) = vlayout.find_child_from_name(HELP_NAME) {
-            vlayout.remove_child(id);
-        } else {
-            vlayout.add_child(
-                Panel::new(TextView::new("helpful stuff"))
-                    .title("help")
-                    .title_position(HAlign::Left)
-                    .with_name(HELP_NAME),
-            );
-        }
-    });
+
+    siv.add_global_callback('q', handle_exit);
+    siv.add_global_callback(Key::Enter, handle_exit);
     siv.add_global_callback('j', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
         let cb = curr.get_inner_mut().select_down(1);
@@ -319,24 +336,29 @@ fn main() {
         update_curr(s, false);
         update_prev(s);
     });
-    siv.add_global_callback('G', |s| {
-        let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
-        let curr_select = curr.get_inner_mut();
-        let cb = curr_select.set_selection(curr_select.len() - 1);
-        cb(s);
-        curr.scroll_to_important_area();
+    siv.add_global_callback('e', |s| {
+        let goto_mode = s.user_data::<State>().unwrap().goto_mode;
+        if goto_mode {
+            let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> =
+                s.find_name(CURR_NAME).unwrap();
+            let curr_select = curr.get_inner_mut();
+            let cb = curr_select.set_selection(curr_select.len() - 1);
+            cb(s);
+            curr.scroll_to_important_area();
+            s.user_data::<State>().unwrap().goto_mode = false;
+        }
     });
     siv.add_global_callback('g', |s| {
-        let pressed_g = s.user_data::<State>().unwrap().pressed_g;
-        if pressed_g {
+        let goto_mode = s.user_data::<State>().unwrap().goto_mode;
+        if goto_mode {
             let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> =
                 s.find_name(CURR_NAME).unwrap();
             let cb = curr.get_inner_mut().set_selection(0);
             cb(s);
             curr.scroll_to_important_area();
-            s.user_data::<State>().unwrap().pressed_g = false;
+            s.user_data::<State>().unwrap().goto_mode = false;
         } else {
-            s.user_data::<State>().unwrap().pressed_g = true;
+            s.user_data::<State>().unwrap().goto_mode = true;
         }
     });
     siv.add_global_callback(Event::CtrlChar('h'), |s| {
@@ -352,20 +374,18 @@ fn main() {
                 EditView::new()
                     .filler(" ")
                     .on_edit(|s, text, _| search(s, text))
-                    .with_name(SEARCH_NAME)
                     .full_width()
                     .fixed_height(1)
             )
-            .with_name(SEARCH_BAR_NAME),
+            .with_name(SEARCH_NAME),
         );
 
-        // workaround because focus_name() fails
+        // this sets the focus to the EditView
         vlayout.set_focus_index(2).unwrap();
-        // s.focus_name(SEARCH_NAME).unwrap();
     });
     siv.add_global_callback(Event::Key(Key::Esc), |s| {
         let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
-        if let Some(id) = vlayout.find_child_from_name(SEARCH_BAR_NAME) {
+        if let Some(id) = vlayout.find_child_from_name(SEARCH_NAME) {
             vlayout.remove_child(id);
         } else {
             s.quit();
