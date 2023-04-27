@@ -6,8 +6,8 @@ use cursive::theme::{Color, ColorStyle, ColorType, PaletteColor, Theme};
 use cursive::utils::markup::StyledString;
 use cursive::view::{Nameable, Resizable, Scrollable, Selector};
 use cursive::views::{
-    EditView, Layer, LayerPosition, LinearLayout, NamedView, ScrollView, SelectView, ShadowView,
-    StackView, TextView, ViewRef,
+    EditView, Layer, LayerPosition, LinearLayout, ScrollView, SelectView, ShadowView, StackView,
+    TextView, ViewRef,
 };
 use cursive::{Cursive, View};
 use cursive_extras::{hlayout, vlayout};
@@ -30,7 +30,6 @@ const PERMISSIONS_NAME: &str = "permissions";
 struct State {
     show_hidden: bool,
     goto_mode: bool,
-    accent_color: Color,
 }
 
 fn update_prev(s: &mut Cursive) {
@@ -95,13 +94,13 @@ fn update_curr(s: &mut Cursive, is_enter: bool) {
     }
 }
 
-fn get_symolic_permissions(permissions: u32) -> String {
+fn get_symbolic_permissions(permissions: u32) -> String {
     let mut symbolic = String::new();
     symbolic += if permissions.bit(14) { "d" } else { "-" };
-    for i in (0..9).step_by(3).rev() {
+    for i in (2..11).step_by(3).rev() {
         symbolic += if permissions.bit(i) { "r" } else { "-" };
-        symbolic += if permissions.bit(i + 1) { "w" } else { "-" };
-        symbolic += if permissions.bit(i + 2) { "x" } else { "-" };
+        symbolic += if permissions.bit(i - 1) { "w" } else { "-" };
+        symbolic += if permissions.bit(i - 2) { "x" } else { "-" };
     }
     symbolic
 }
@@ -124,7 +123,7 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
     ));
 
     let permissions = item.metadata().unwrap().permissions().mode();
-    permissions_text.set_content(get_symolic_permissions(permissions));
+    permissions_text.set_content(get_symbolic_permissions(permissions));
 
     hlayout.remove_child(2);
 
@@ -209,7 +208,7 @@ fn search(s: &mut Cursive, text: &str) {
         let cb = curr_select.set_selection(item_id);
         cb(s);
         curr.scroll_to_important_area();
-        // update_id_text(s, curr.get_inner());
+        update_id_text(s, curr.get_inner());
     }
 }
 
@@ -285,7 +284,6 @@ fn main() {
     let state = State {
         show_hidden: false,
         goto_mode: false,
-        accent_color,
     };
     siv.set_user_data(state);
 
@@ -430,4 +428,25 @@ fn main() {
     });
 
     siv.run();
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::get_symbolic_permissions;
+
+    #[test]
+    fn test_permission_to_str() {
+        assert_eq!("-rw-r--r--", get_symbolic_permissions(0o644));
+        assert_eq!("----------", get_symbolic_permissions(0o000)); // no permissions
+        assert_eq!("-rwx------", get_symbolic_permissions(0o700)); // read, write, & execute only for owner
+        assert_eq!("-rwxrwx---", get_symbolic_permissions(0o770)); // read, write, & execute for owner and group
+        assert_eq!("-rwxrwxrwx", get_symbolic_permissions(0o777)); // read, write, & execute for owner, group and others
+        assert_eq!("---x--x--x", get_symbolic_permissions(0o111)); // execute
+        assert_eq!("--w--w--w-", get_symbolic_permissions(0o222)); // write
+        assert_eq!("--wx-wx-wx", get_symbolic_permissions(0o333)); // write & execute
+        assert_eq!("-r--r--r--", get_symbolic_permissions(0o444)); // read
+        assert_eq!("-r-xr-xr-x", get_symbolic_permissions(0o555)); // read & execute
+        assert_eq!("-rw-rw-rw-", get_symbolic_permissions(0o666)); // read & write
+        assert_eq!("-rwxr-----", get_symbolic_permissions(0o740)); // owner can read, write, & execute; group can only read; others have no permissions
+    }
 }
