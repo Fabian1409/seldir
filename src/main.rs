@@ -4,11 +4,12 @@ use cursive::align::HAlign;
 use cursive::event::{Event, Key};
 use cursive::theme::{Color, ColorStyle, ColorType, PaletteColor, Theme};
 use cursive::utils::markup::StyledString;
-use cursive::view::{Nameable, Resizable, Scrollable};
+use cursive::view::{Nameable, Resizable, Scrollable, Selector};
 use cursive::views::{
-    EditView, Layer, LinearLayout, ScrollView, SelectView, ShadowView, TextView, ViewRef,
+    EditView, Layer, LayerPosition, LinearLayout, NamedView, ScrollView, SelectView, ShadowView,
+    StackView, TextView, ViewRef,
 };
-use cursive::Cursive;
+use cursive::{Cursive, View};
 use cursive_extras::{hlayout, vlayout};
 use std::cmp::Ordering;
 use std::fs::DirEntry;
@@ -23,11 +24,13 @@ const SEARCH_NAME: &str = "search";
 const HLAYOUT_NAME: &str = "hlayout";
 const VLAYOUT_NAME: &str = "vlayout";
 const PATH_TEXT_NAME: &str = "path_text";
+const ID_TEXT_NAME: &str = "id_text";
+const PERMISSIONS_NAME: &str = "permissions";
 
-#[derive(Default)]
 struct State {
     show_hidden: bool,
     goto_mode: bool,
+    accent_color: Color,
 }
 
 fn update_prev(s: &mut Cursive) {
@@ -100,23 +103,28 @@ fn get_symolic_permissions(permissions: u32) -> String {
         symbolic += if permissions.bit(i + 1) { "w" } else { "-" };
         symbolic += if permissions.bit(i + 2) { "x" } else { "-" };
     }
-    return symbolic;
+    symbolic
 }
 
 fn update_next(s: &mut Cursive, item: &DirEntry) {
     let mut hlayout: ViewRef<LinearLayout> = s.find_name(HLAYOUT_NAME).unwrap();
     let mut path_text: ViewRef<TextView> = s.find_name(PATH_TEXT_NAME).unwrap();
-    let mut permissions_text: ViewRef<TextView> = s.find_name("permissions_name").unwrap();
-    let mut num_text: ViewRef<TextView> = s.find_name("num_name").unwrap();
+    let mut permissions_text: ViewRef<TextView> = s.find_name(PERMISSIONS_NAME).unwrap();
+    let curr_dir = env::current_dir().unwrap();
+    let curr_dir_str = curr_dir.to_str().unwrap();
 
     path_text.set_content(format!(
         "{}/{}",
-        env::current_dir().unwrap().to_string_lossy(),
+        if curr_dir_str.eq("/") {
+            "".to_owned()
+        } else {
+            curr_dir_str.to_owned()
+        },
         item.file_name().to_string_lossy()
     ));
 
-    // let permissions = item.metadata().unwrap().permissions().mode();
-    // permissions_text.set_content(get_symolic_permissions(permissions));
+    let permissions = item.metadata().unwrap().permissions().mode();
+    permissions_text.set_content(get_symolic_permissions(permissions));
 
     hlayout.remove_child(2);
 
@@ -127,7 +135,7 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
 
         populate_select(s, &mut next_select, &item.path());
         hlayout.add_child(
-            ShadowView::new(next_select)
+            ShadowView::new(next_select.scrollable().show_scrollbars(false))
                 .top_padding(false)
                 .min_width(30),
         );
@@ -200,7 +208,23 @@ fn search(s: &mut Cursive, text: &str) {
         let item_id = curr_select.iter().position(|x| x.0.eq(item.0)).unwrap();
         let cb = curr_select.set_selection(item_id);
         cb(s);
+        curr.scroll_to_important_area();
+        // update_id_text(s, curr.get_inner());
     }
+}
+
+fn update_id_text(s: &mut Cursive, curr_select: &SelectView<DirEntry>) {
+    let mut num_text: ViewRef<TextView> = s.find_name(ID_TEXT_NAME).unwrap();
+    if let Some(id) = curr_select.selected_id() {
+        num_text.set_content(format!("{}/{}", id + 1, curr_select.len()));
+    }
+}
+
+fn change_dir(s: &mut Cursive, is_enter: bool) {
+    update_curr(s, is_enter);
+    update_prev(s);
+    let curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
+    update_id_text(s, curr.get_inner());
 }
 
 fn init(s: &mut Cursive) {
@@ -220,6 +244,7 @@ fn init(s: &mut Cursive) {
 
     let curr_selection = curr_select.selection().unwrap();
     update_next(s, &curr_selection);
+    update_id_text(s, curr_select);
 }
 
 fn handle_exit(s: &mut Cursive) {
@@ -238,7 +263,7 @@ fn handle_exit(s: &mut Cursive) {
     .to_str()
     .unwrap()
     .to_owned();
-    println!("{}", path);
+    println!("{path}");
     s.quit();
 }
 
@@ -257,10 +282,14 @@ fn main() {
     theme.palette[PaletteColor::HighlightInactive] = accent_color;
     siv.set_theme(theme);
 
-    let state = State::default();
+    let state = State {
+        show_hidden: false,
+        goto_mode: false,
+        accent_color,
+    };
     siv.set_user_data(state);
 
-    siv.add_fullscreen_layer(Layer::new(vlayout!(
+    siv.add_fullscreen_layer(Layer::new(
         vlayout!(
             TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name(PATH_TEXT_NAME),
             hlayout!(
@@ -285,57 +314,72 @@ fn main() {
                 .top_padding(false)
             )
             .with_name(HLAYOUT_NAME)
-            .full_height()
+            .full_height(),
+            StackView::new()
+                .fullscreen_layer(
+                    hlayout!(
+                        TextView::new("search: "),
+                        EditView::new()
+                            .filler(" ")
+                            .on_edit(|s, text, _| search(s, text))
+                            .with_name("edit_view")
+                            .full_width()
+                            .fixed_height(1)
+                    )
+                    .with_name(SEARCH_NAME),
+                )
+                .fullscreen_layer(
+                    hlayout!(
+                        TextView::new("")
+                            .style(ColorStyle::front(accent_color))
+                            .with_name(PERMISSIONS_NAME)
+                            .full_width(),
+                        TextView::new("")
+                            .h_align(HAlign::Right)
+                            .with_name(ID_TEXT_NAME)
+                            .full_width()
+                    )
+                    .with_name("stats")
+                )
+                .with_name("stack_view")
+                .fixed_height(1)
+                .full_width()
         )
         .with_name(VLAYOUT_NAME)
         .full_width(),
-        hlayout!(
-            TextView::new("")
-                .style(ColorStyle::front(accent_color))
-                .with_name("permissions_name")
-                .full_width(),
-            TextView::new("")
-                .h_align(HAlign::Right)
-                .with_name("num_name")
-                .full_width()
-        )
-        .fixed_height(1)
-    )));
+    ));
 
     init(&mut siv);
 
-    siv.focus_name("curr").unwrap();
+    siv.focus_name(CURR_NAME).unwrap();
 
     siv.add_global_callback('q', handle_exit);
-    siv.add_global_callback(Key::Enter, handle_exit);
+    siv.add_global_callback(Key::Enter, |s| {
+        let mut stack: ViewRef<StackView> = s.find_name("stack_view").unwrap();
+        if let Some(LayerPosition::FromBack(1)) = stack.find_layer_from_name(SEARCH_NAME) {
+            stack.move_to_back(LayerPosition::FromFront(0));
+        } else {
+            handle_exit(s);
+        }
+    });
     siv.add_global_callback('j', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
         let cb = curr.get_inner_mut().select_down(1);
         cb(s);
         curr.scroll_to_important_area();
+        update_id_text(s, curr.get_inner());
     });
     siv.add_global_callback('k', |s| {
         let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
         let cb = curr.get_inner_mut().select_up(1);
         cb(s);
         curr.scroll_to_important_area();
+        update_id_text(s, curr.get_inner());
     });
-    siv.add_global_callback('l', |s| {
-        update_curr(s, true);
-        update_prev(s);
-    });
-    siv.add_global_callback(Key::Right, |s| {
-        update_curr(s, true);
-        update_prev(s);
-    });
-    siv.add_global_callback('h', |s| {
-        update_curr(s, false);
-        update_prev(s);
-    });
-    siv.add_global_callback(Key::Left, |s| {
-        update_curr(s, false);
-        update_prev(s);
-    });
+    siv.add_global_callback('l', |s| change_dir(s, true));
+    siv.add_global_callback(Key::Right, |s| change_dir(s, true));
+    siv.add_global_callback('h', |s| change_dir(s, false));
+    siv.add_global_callback(Key::Left, |s| change_dir(s, false));
     siv.add_global_callback('e', |s| {
         let goto_mode = s.user_data::<State>().unwrap().goto_mode;
         if goto_mode {
@@ -367,26 +411,19 @@ fn main() {
         init(s);
     });
     siv.add_global_callback('/', |s| {
-        let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
-        vlayout.add_child(
-            hlayout!(
-                TextView::new("search: "),
-                EditView::new()
-                    .filler(" ")
-                    .on_edit(|s, text, _| search(s, text))
-                    .full_width()
-                    .fixed_height(1)
-            )
-            .with_name(SEARCH_NAME),
-        );
+        let mut stack: ViewRef<StackView> = s.find_name("stack_view").unwrap();
+        stack.move_to_front(LayerPosition::FromFront(1));
+        let selector = Selector::Name("edit_view");
+        stack.focus_view(&selector).unwrap();
+        // let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
 
         // this sets the focus to the EditView
-        vlayout.set_focus_index(2).unwrap();
+        // vlayout.set_focus_index(2).unwrap();
     });
     siv.add_global_callback(Event::Key(Key::Esc), |s| {
-        let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
-        if let Some(id) = vlayout.find_child_from_name(SEARCH_NAME) {
-            vlayout.remove_child(id);
+        let mut stack: ViewRef<StackView> = s.find_name("stack_view").unwrap();
+        if let Some(LayerPosition::FromBack(1)) = stack.find_layer_from_name(SEARCH_NAME) {
+            stack.move_to_back(LayerPosition::FromFront(0));
         } else {
             s.quit();
         }
