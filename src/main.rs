@@ -1,4 +1,5 @@
 use bit::BitIndex;
+use chrono::prelude::*;
 use clap::{arg, command};
 use cursive::align::HAlign;
 use cursive::event::{Event, Key};
@@ -25,7 +26,8 @@ const HLAYOUT_NAME: &str = "hlayout";
 const VLAYOUT_NAME: &str = "vlayout";
 const PATH_TEXT_NAME: &str = "path_text";
 const ID_TEXT_NAME: &str = "id_text";
-const PERMISSIONS_NAME: &str = "permissions";
+const PERMISSIONS_TEXT_NAME: &str = "permissions";
+const LAST_MOD_TEXT_NAME: &str = "last_modified";
 
 struct State {
     show_hidden: bool,
@@ -108,7 +110,8 @@ fn get_symbolic_permissions(permissions: u32) -> String {
 fn update_next(s: &mut Cursive, item: &DirEntry) {
     let mut hlayout: ViewRef<LinearLayout> = s.find_name(HLAYOUT_NAME).unwrap();
     let mut path_text: ViewRef<TextView> = s.find_name(PATH_TEXT_NAME).unwrap();
-    let mut permissions_text: ViewRef<TextView> = s.find_name(PERMISSIONS_NAME).unwrap();
+    let mut permissions_text: ViewRef<TextView> = s.find_name(PERMISSIONS_TEXT_NAME).unwrap();
+    let mut last_modified_text: ViewRef<TextView> = s.find_name(LAST_MOD_TEXT_NAME).unwrap();
     let curr_dir = env::current_dir().unwrap();
     let curr_dir_str = curr_dir.to_str().unwrap();
 
@@ -122,8 +125,11 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
         item.file_name().to_string_lossy()
     ));
 
-    let permissions = item.metadata().unwrap().permissions().mode();
-    permissions_text.set_content(get_symbolic_permissions(permissions));
+    let metadata = item.metadata().unwrap();
+    let last_modified = metadata.modified().unwrap();
+    let date_time: DateTime<Utc> = last_modified.into();
+    permissions_text.set_content(get_symbolic_permissions(metadata.permissions().mode()));
+    last_modified_text.set_content(format!(" {}", date_time.format("%d-%m-%Y %H:%M")));
 
     hlayout.remove_child(2);
 
@@ -330,8 +336,8 @@ fn main() {
                     hlayout!(
                         TextView::new("")
                             .style(ColorStyle::front(accent_color))
-                            .with_name(PERMISSIONS_NAME)
-                            .full_width(),
+                            .with_name(PERMISSIONS_TEXT_NAME),
+                        TextView::new("").with_name(LAST_MOD_TEXT_NAME).full_width(),
                         TextView::new("")
                             .h_align(HAlign::Right)
                             .with_name(ID_TEXT_NAME)
