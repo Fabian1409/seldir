@@ -28,6 +28,9 @@ const PATH_TEXT_NAME: &str = "path_text";
 const ID_TEXT_NAME: &str = "id_text";
 const PERMISSIONS_TEXT_NAME: &str = "permissions";
 const LAST_MOD_TEXT_NAME: &str = "last_modified";
+const STACK_VIEW_NAME: &str = "stack_view";
+const STATS_NAME: &str = "stats";
+const EDIT_VIEW_NAME: &str = "edit_view";
 
 struct State {
     show_hidden: bool,
@@ -326,7 +329,7 @@ fn main() {
                         EditView::new()
                             .filler(" ")
                             .on_edit(|s, text, _| search(s, text))
-                            .with_name("edit_view")
+                            .with_name(EDIT_VIEW_NAME)
                             .full_width()
                             .fixed_height(1)
                     )
@@ -343,9 +346,9 @@ fn main() {
                             .with_name(ID_TEXT_NAME)
                             .full_width()
                     )
-                    .with_name("stats")
+                    .with_name(STATS_NAME)
                 )
-                .with_name("stack_view")
+                .with_name(STACK_VIEW_NAME)
                 .fixed_height(1)
                 .full_width()
         )
@@ -359,7 +362,7 @@ fn main() {
 
     siv.add_global_callback('q', handle_exit);
     siv.add_global_callback(Key::Enter, |s| {
-        let mut stack: ViewRef<StackView> = s.find_name("stack_view").unwrap();
+        let mut stack: ViewRef<StackView> = s.find_name(STACK_VIEW_NAME).unwrap();
         if let Some(LayerPosition::FromBack(1)) = stack.find_layer_from_name(SEARCH_NAME) {
             stack.move_to_back(LayerPosition::FromFront(0));
         } else {
@@ -415,17 +418,11 @@ fn main() {
         init(s);
     });
     siv.add_global_callback('/', |s| {
-        let mut stack: ViewRef<StackView> = s.find_name("stack_view").unwrap();
+        let mut stack: ViewRef<StackView> = s.find_name(STACK_VIEW_NAME).unwrap();
         stack.move_to_front(LayerPosition::FromFront(1));
-        let selector = Selector::Name("edit_view");
-        stack.focus_view(&selector).unwrap();
-        // let mut vlayout: ViewRef<LinearLayout> = s.find_name(VLAYOUT_NAME).unwrap();
-
-        // this sets the focus to the EditView
-        // vlayout.set_focus_index(2).unwrap();
     });
     siv.add_global_callback(Event::Key(Key::Esc), |s| {
-        let mut stack: ViewRef<StackView> = s.find_name("stack_view").unwrap();
+        let mut stack: ViewRef<StackView> = s.find_name(STACK_VIEW_NAME).unwrap();
         if let Some(LayerPosition::FromBack(1)) = stack.find_layer_from_name(SEARCH_NAME) {
             stack.move_to_back(LayerPosition::FromFront(0));
         } else {
