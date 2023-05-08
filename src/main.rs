@@ -5,12 +5,12 @@ use cursive::align::HAlign;
 use cursive::event::{Event, Key};
 use cursive::theme::{Color, ColorStyle, ColorType, PaletteColor, Theme};
 use cursive::utils::markup::StyledString;
-use cursive::view::{Nameable, Resizable, Scrollable, Selector};
+use cursive::view::{Nameable, Resizable, Scrollable};
 use cursive::views::{
     EditView, Layer, LayerPosition, LinearLayout, ScrollView, SelectView, ShadowView, StackView,
     TextView, ViewRef,
 };
-use cursive::{Cursive, View};
+use cursive::Cursive;
 use cursive_extras::{hlayout, vlayout};
 use std::cmp::Ordering;
 use std::fs::DirEntry;
