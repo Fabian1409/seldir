@@ -355,7 +355,7 @@ fn main() {
 
     init(&mut siv);
 
-    siv.focus_name(CURR_NAME).unwrap();
+    siv.focus_name(SEARCH_NAME).unwrap();
 
     siv.add_global_callback('q', handle_exit);
     siv.add_global_callback(Key::Enter, |s| {
