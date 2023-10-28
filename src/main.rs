@@ -32,9 +32,15 @@ const STACK_VIEW_NAME: &str = "stack_view";
 const STATS_NAME: &str = "stats";
 const EDIT_VIEW_NAME: &str = "edit_view";
 
+enum Mode {
+    Normal,
+    Goto,
+    Find,
+}
+
 struct State {
     show_hidden: bool,
-    goto_mode: bool,
+    mode: Mode,
 }
 
 fn update_prev(s: &mut Cursive) {
@@ -130,6 +136,7 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
 
     let metadata = item.metadata().unwrap();
     let last_modified = metadata.modified().unwrap();
+
     let date_time: DateTime<Utc> = last_modified.into();
     permissions_text.set_content(get_symbolic_permissions(metadata.permissions().mode()));
     last_modified_text.set_content(format!(" {}", date_time.format("%d-%m-%Y %H:%M")));
@@ -219,6 +226,13 @@ fn search(s: &mut Cursive, text: &str) {
         curr.scroll_to_important_area();
         update_id_text(s, curr.get_inner());
     }
+
+    if matches!(s.user_data::<State>().unwrap().mode, Mode::Find) {
+        s.user_data::<State>().unwrap().mode = Mode::Normal;
+        s.call_on_name(STACK_VIEW_NAME, |v: &mut StackView| {
+            v.move_to_back(LayerPosition::FromFront(0))
+        });
+    }
 }
 
 fn update_id_text(s: &mut Cursive, curr_select: &SelectView<DirEntry>) {
@@ -292,7 +306,7 @@ fn main() {
 
     let state = State {
         show_hidden: false,
-        goto_mode: false,
+        mode: Mode::Normal,
     };
     siv.set_user_data(state);
 
@@ -306,7 +320,7 @@ fn main() {
                         .scrollable()
                         .show_scrollbars(false)
                         .with_name(PREV_NAME)
-                        .fixed_width(15)
+                        .fixed_width(20)
                 )
                 .top_padding(false)
                 .left_padding(false),
@@ -346,7 +360,7 @@ fn main() {
                             .with_name(ID_TEXT_NAME)
                             .full_width()
                     )
-                    .with_name(STATS_NAME)
+                    .with_name(STATS_NAME),
                 )
                 .with_name(STACK_VIEW_NAME)
                 .fixed_height(1)
@@ -383,34 +397,54 @@ fn main() {
         curr.scroll_to_important_area();
         update_id_text(s, curr.get_inner());
     });
+    siv.add_global_callback('J', |s| {
+        let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
+        let cb = curr.get_inner_mut().select_down(5);
+        cb(s);
+        curr.scroll_to_important_area();
+        update_id_text(s, curr.get_inner());
+    });
+    siv.add_global_callback('K', |s| {
+        let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
+        let cb = curr.get_inner_mut().select_up(5);
+        cb(s);
+        curr.scroll_to_important_area();
+        update_id_text(s, curr.get_inner());
+    });
+    siv.add_global_callback('f', |s| {
+        s.call_on_name(EDIT_VIEW_NAME, |v: &mut EditView| v.set_content(""));
+        s.user_data::<State>().unwrap().mode = Mode::Find;
+        let mut stack: ViewRef<StackView> = s.find_name(STACK_VIEW_NAME).unwrap();
+        stack.move_to_front(LayerPosition::FromFront(1));
+    });
     siv.add_global_callback('l', |s| change_dir(s, true));
     siv.add_global_callback(Key::Right, |s| change_dir(s, true));
     siv.add_global_callback('h', |s| change_dir(s, false));
     siv.add_global_callback(Key::Left, |s| change_dir(s, false));
-    siv.add_global_callback('e', |s| {
-        let goto_mode = s.user_data::<State>().unwrap().goto_mode;
-        if goto_mode {
+    siv.add_global_callback('e', |s| match s.user_data::<State>().unwrap().mode {
+        Mode::Goto => {
             let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> =
                 s.find_name(CURR_NAME).unwrap();
             let curr_select = curr.get_inner_mut();
             let cb = curr_select.set_selection(curr_select.len() - 1);
             cb(s);
             curr.scroll_to_important_area();
-            s.user_data::<State>().unwrap().goto_mode = false;
+            s.user_data::<State>().unwrap().mode = Mode::Normal;
         }
+        Mode::Find => search(s, "e"),
+        _ => {}
     });
-    siv.add_global_callback('g', |s| {
-        let goto_mode = s.user_data::<State>().unwrap().goto_mode;
-        if goto_mode {
+    siv.add_global_callback('g', |s| match s.user_data::<State>().unwrap().mode {
+        Mode::Normal => s.user_data::<State>().unwrap().mode = Mode::Goto,
+        Mode::Goto => {
             let mut curr: ViewRef<ScrollView<SelectView<DirEntry>>> =
                 s.find_name(CURR_NAME).unwrap();
             let cb = curr.get_inner_mut().set_selection(0);
             cb(s);
             curr.scroll_to_important_area();
-            s.user_data::<State>().unwrap().goto_mode = false;
-        } else {
-            s.user_data::<State>().unwrap().goto_mode = true;
+            s.user_data::<State>().unwrap().mode = Mode::Normal;
         }
+        _ => {}
     });
     siv.add_global_callback(Event::CtrlChar('h'), |s| {
         s.user_data::<State>().unwrap().show_hidden ^= true;
@@ -418,6 +452,7 @@ fn main() {
         init(s);
     });
     siv.add_global_callback('/', |s| {
+        s.call_on_name(EDIT_VIEW_NAME, |v: &mut EditView| v.set_content(""));
         let mut stack: ViewRef<StackView> = s.find_name(STACK_VIEW_NAME).unwrap();
         stack.move_to_front(LayerPosition::FromFront(1));
     });
