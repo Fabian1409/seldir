@@ -13,9 +13,11 @@ use cursive::views::{
 use cursive::Cursive;
 use cursive_extras::{hlayout, vlayout};
 use std::cmp::Ordering;
-use std::fs::DirEntry;
+use std::fs::{DirEntry, OpenOptions};
+use std::io::prelude::*;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
+use std::process::Command;
 use std::{env, fs};
 
 const CURR_NAME: &str = "curr";
@@ -152,7 +154,19 @@ fn update_next(s: &mut Cursive, item: &DirEntry) {
         hlayout.add_child(
             ShadowView::new(next_select.scrollable().show_scrollbars(false))
                 .top_padding(false)
-                .min_width(30),
+                .full_width(),
+        );
+    } else {
+        let file_content =
+            fs::read_to_string(item.path()).unwrap_or(String::from("failed to read file"));
+        hlayout.add_child(
+            ShadowView::new(
+                TextView::new(file_content)
+                    .scrollable()
+                    .show_scrollbars(false),
+            )
+            .top_padding(false)
+            .full_width(),
         );
     }
 }
@@ -271,22 +285,23 @@ fn init(s: &mut Cursive) {
 
 fn handle_exit(s: &mut Cursive) {
     let curr: ViewRef<ScrollView<SelectView<DirEntry>>> = s.find_name(CURR_NAME).unwrap();
-    let selection = curr.get_inner().selection();
-    let path = match selection {
-        Some(dir) => {
-            if dir.metadata().unwrap().is_dir() {
-                dir.path()
-            } else {
-                env::current_dir().unwrap()
-            }
+    if let Some(path) = curr.get_inner().selection() {
+        let path = path.path();
+        let dir = path.to_str().unwrap();
+        if path.metadata().unwrap().is_dir() {
+            fs::write("/tmp/seldir", dir).unwrap();
+            s.quit();
+        } else {
+            let editor = env::var("EDITOR").unwrap_or(String::from("/usr/bin/hx"));
+            Command::new(editor)
+                .arg(dir)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
+            s.clear();
         }
-        None => env::current_dir().unwrap(),
     }
-    .to_str()
-    .unwrap()
-    .to_owned();
-    println!("{path}");
-    s.quit();
 }
 
 fn main() {
@@ -310,6 +325,14 @@ fn main() {
     };
     siv.set_user_data(state);
 
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open("/tmp/seldir")
+        .unwrap();
+    write!(file, "{}", env::current_dir().unwrap().to_str().unwrap()).unwrap();
+
     siv.add_fullscreen_layer(Layer::new(
         vlayout!(
             TextView::new(env::current_dir().unwrap().to_string_lossy()).with_name(PATH_TEXT_NAME),
@@ -330,7 +353,7 @@ fn main() {
                         .scrollable()
                         .show_scrollbars(false)
                         .with_name(CURR_NAME)
-                        .min_width(30)
+                        .fixed_width(30)
                 )
                 .top_padding(false)
             )
