@@ -17,7 +17,6 @@ use std::fs::{DirEntry, OpenOptions};
 use std::io::prelude::*;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
-use std::process::Command;
 use std::{env, fs};
 
 const CURR_NAME: &str = "curr";
@@ -289,17 +288,8 @@ fn handle_exit(s: &mut Cursive) {
         let path = path.path();
         let dir = path.to_str().unwrap();
         if path.metadata().unwrap().is_dir() {
-            fs::write("/tmp/seldir", dir).unwrap();
+            println!("{dir}");
             s.quit();
-        } else {
-            let editor = env::var("EDITOR").unwrap_or(String::from("/usr/bin/hx"));
-            Command::new(editor)
-                .arg(dir)
-                .spawn()
-                .unwrap()
-                .wait()
-                .unwrap();
-            s.clear();
         }
     }
 }
